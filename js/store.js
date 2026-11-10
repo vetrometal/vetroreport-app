@@ -1,4 +1,4 @@
-/* VetroReport v3.0 — dados partilhados na Supabase (Postgres + Storage + Realtime) */
+/* VetroReport — dados partilhados na Supabase (Postgres + Storage + Realtime) */
 VR.emptyData = () => ({
   definicoes: { normal_day_minutes: 480, break_minutes: 60, break_threshold_minutes: 360 },
   utilizadores: [], equipas: [], funcionarios: [], obras: [], feriados: [],
@@ -24,6 +24,8 @@ VR.authEmail = (login) => {
   return l.includes("@") ? l : `${l}@${VR.DOMINIO_LOGIN}`;
 };
 
+/* Autoria: preenchida pela base de dados (trigger), a partir da sessão. Nunca é enviada pelo cliente. */
+VR.AUTORIA = ["criado_por","criado_em","alterado_por","alterado_em","origem"];
 VR.TABELAS = {
   utilizadores: ["id","auth_id","email","nome","role","ativo"],
   equipas: ["id","nome","ordem"],
@@ -32,12 +34,15 @@ VR.TABELAS = {
   feriados: ["id","data","nome"],
   registos: ["id","funcionario_id","data","presenca","nota_presenca","entrada","saida","trabalho",
     "normal_day_minutes","break_minutes","break_threshold_minutes","gross_minutes","break_applied_minutes",
-    "net_minutes","overtime_minutes","criado_por_id","atualizado_por_id","criado_em","atualizado_em"],
+    "net_minutes","overtime_minutes"],
   alocacoes: ["id","registo_id","obra_id","minutos"],
-  ocorrencias: ["id","registo_id","tipo","descricao","foto","criado_por_id","criado_em","atualizado_em"],
-  notas: ["id","data","texto","autor_id","criado_em","atualizado_em"],
+  ocorrencias: ["id","registo_id","tipo","descricao","foto"],
+  notas: ["id","data","texto","autor_id"],
   auditoria: ["id","utilizador_id","acao","modelo","objeto_id","resumo","detalhe","criado_em"],
 };
+for (const t of Object.keys(VR.TABELAS)) if (t !== "auditoria") VR.TABELAS[t].push(...VR.AUTORIA);
+/* Linha para enviar à base de dados: sem as colunas de autoria */
+VR.paraEnviar = (t, n) => { if (t !== "auditoria") for (const c of VR.AUTORIA) delete n[c]; return n; };
 VR.ORDEM = ["utilizadores","equipas","funcionarios","obras","feriados","registos","alocacoes","ocorrencias","notas","auditoria"];
 /* utilizadores só mudam pela função vr-auth; auditoria é só acrescentar */
 VR.SO_LEITURA = new Set(["utilizadores"]);
@@ -73,8 +78,9 @@ VR.Store = class Store {
   }
   _chave(t, row) {
     const n = this._norm(t, row);
-    // datas/horas de criação não contam para "alterado" (formatos diferem entre cliente e servidor)
+    // autoria e datas não contam para "alterado" (são da base de dados)
     delete n.criado_em;
+    if (t !== "auditoria") for (const c of VR.AUTORIA) delete n[c];
     return JSON.stringify(n);
   }
   _snapSet(t, row) {
@@ -108,7 +114,7 @@ VR.Store = class Store {
     if (admin) audit = await this._todos("auditoria", { ordem: "criado_em", asc: false, limite: 300 });
     const data = VR.emptyData();
     if (defs.data) {
-      for (const c of VR.DEFS_COLS) data.definicoes[c] = defs.data[c];
+      for (const c of [...VR.DEFS_COLS, ...VR.AUTORIA]) data.definicoes[c] = defs.data[c];
       this.defsSnap = { k: JSON.stringify(VR.DEFS_COLS.map(c => defs.data[c])), u: defs.data.updated_at };
     }
     this.snap = {};
@@ -171,14 +177,15 @@ VR.Store = class Store {
         if (error) throw VR.erroSupabase(error);
         if (!r.length) throw VR.conflito();
         this.defsSnap = { k: kDefs, u: r[0].updated_at };
+        for (const c of VR.AUTORIA) d[c] = r[0][c];
       }
       // inserções e alterações (pais antes de filhos)
       for (const { t, ins, upd } of plano) {
         if (ins.length) {
           const linhas = ins.map(r => {
             const n = this._norm(t, r);
-            for (const c of ["criado_em","atualizado_em"]) if (c in n && !n[c]) n[c] = new Date().toISOString();
-            return n;
+            if (t === "auditoria") { if (!n.criado_em) n.criado_em = new Date().toISOString(); return n; }
+            return VR.paraEnviar(t, n);
           });
           for (let i = 0; i < linhas.length; i += 500) {
             const lote = linhas.slice(i, i + 500);
@@ -194,7 +201,7 @@ VR.Store = class Store {
           }
         }
         for (const [r, u] of upd) {
-          const n = this._norm(t, r); delete n.id;
+          const n = VR.paraEnviar(t, this._norm(t, r)); delete n.id;
           const { data: rs, error } = await this.sb.from(t).update(n).eq("id", r.id).eq("updated_at", u).select();
           if (error) throw VR.erroSupabase(error);
           if (!rs.length) throw VR.conflito();
@@ -256,7 +263,7 @@ VR.Store = class Store {
     if (t === "definicoes") {
       if (p.new && p.new.id === 1) {
         if (!this.defsSnap || this.defsSnap.u !== p.new.updated_at) {
-          for (const c of VR.DEFS_COLS) this.data.definicoes[c] = p.new[c];
+          for (const c of [...VR.DEFS_COLS, ...VR.AUTORIA]) this.data.definicoes[c] = p.new[c];
           this.defsSnap = { k: JSON.stringify(VR.DEFS_COLS.map(c => p.new[c])), u: p.new.updated_at };
           mudou = true;
         }

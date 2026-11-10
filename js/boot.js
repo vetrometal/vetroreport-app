@@ -1,4 +1,23 @@
-/* VetroReport v3.0 — arranque */
+/* VetroReport — arranque */
+/* Versão nova do service worker à espera: mostra o aviso fixo «Nova versão disponível — atualizar» */
+App.novaVersao = (worker) => {
+  App.swEspera = worker;
+  let el = document.getElementById("nova-versao");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "nova-versao"; el.className = "update-toast"; el.setAttribute("role", "status");
+    el.innerHTML = `<span>Nova versão disponível —</span><button type="button" class="btn" data-atualizar-app>atualizar</button>`;
+    document.body.appendChild(el);
+    el.querySelector("button").addEventListener("click", () => App.aplicarAtualizacao());
+  }
+};
+App.aplicarAtualizacao = () => {
+  if (App.formSujo && !confirm("Tem alterações por gravar. Atualizar a aplicação agora e perdê-las?")) return;
+  App.atualizarPedido = true;
+  if (App.swEspera) App.swEspera.postMessage("ATUALIZAR"); else location.reload();
+  setTimeout(() => location.reload(), 4000);
+};
+
 App.boot = async () => {
   window.addEventListener("hashchange", () => App.render());
   const cfg = window.VR_CONFIG;
@@ -68,16 +87,28 @@ App.boot = async () => {
   else if (!App.user && path !== "/primeira" && path !== "/entrar") { if (!App.go("/entrar")) await App.render(); }
   else await App.render();
 
-  // Service worker (app instalável + funciona sem rede)
+  // Service worker (app instalável + funciona sem rede + avisa quando há versão nova)
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
-    const tinha = !!navigator.serviceWorker.controller;
-    navigator.serviceWorker.register("sw.js").catch(e => console.warn("SW", e));
     let recarregou = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (!tinha || recarregou) return;
+      if (!App.atualizarPedido || recarregou) return;
       recarregou = true;
-      if (!App.formSujo) location.reload();
+      location.reload();
     });
+    const vigiar = (reg) => {
+      App.swReg = reg;
+      const novo = () => { if (reg.waiting && navigator.serviceWorker.controller) App.novaVersao(reg.waiting); };
+      novo();
+      reg.addEventListener("updatefound", () => {
+        const w = reg.installing;
+        if (w) w.addEventListener("statechange", () => { if (w.state === "installed") novo(); });
+      });
+    };
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(vigiar).catch(e => console.warn("SW", e));
+    // Procura atualizações quando a app volta ao primeiro plano e de hora a hora
+    const procurar = () => { if (App.swReg && navigator.onLine) App.swReg.update().catch(() => {}); };
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") procurar(); });
+    setInterval(procurar, 60 * 60 * 1000);
   }
 };
 

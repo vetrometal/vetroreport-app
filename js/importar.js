@@ -1,4 +1,4 @@
-/* VetroReport v3.0 — importação do ficheiro vetroreport.json da versão 2.x (só administração) */
+/* VetroReport — importação do ficheiro vetroreport.json da versão 2.x (só administração) */
 VR.Importar = {
   _chave: (s) => String(s ?? "").trim().toLowerCase(),
 
@@ -24,6 +24,14 @@ VR.Importar = {
     const N = (v, d = 0) => (v == null || v === "" || !Number.isFinite(Number(v))) ? d : Math.trunc(Number(v));
     const T = (v) => v == null ? "" : String(v);
     const hora = (v) => v ? String(v).slice(0, 5) : null;
+    // Autoria: mantém quem criou/alterou no ficheiro 2.3 (se existir); sem autor fica «importado».
+    // O trigger da base de dados só aceita estes valores de um administrador com origem = 'importado'.
+    const autoria = (x, autorOrig) => {
+      const cp = mapU(x.criado_por_id ?? x.criado_por ?? autorOrig);
+      const ap = mapU(x.atualizado_por_id ?? x.alterado_por ?? null) ?? cp;
+      const ce = x.criado_em || agora;
+      return { origem: "importado", criado_por: cp, alterado_por: ap, criado_em: ce, alterado_em: x.atualizado_em || x.alterado_em || ce };
+    };
     const novoSe = (lista, idOrig, ehOMesmo) => {
       // mantém o id original se estiver livre (ou se já for o mesmo registo), senão gera outro
       const id = Number(idOrig);
@@ -58,7 +66,7 @@ VR.Importar = {
       const ex = D.equipas.find(x => K(x.nome) === K(e.nome));
       const id = ex ? ex.id : novoSe(D.equipas, e.id, () => false);
       mapE[e.id] = id;
-      equipas.push({ id, nome: T(e.nome).trim() || "Equipa", ordem: N(e.ordem) });
+      equipas.push({ id, nome: T(e.nome).trim() || "Equipa", ordem: N(e.ordem), ...autoria(e) });
     }
     await VR.Importar._upsert("equipas", equipas, progresso, "Equipas");
 
@@ -69,7 +77,7 @@ VR.Importar = {
       const ex = D.funcionarios.find(x => x.numero === numero);
       const id = ex ? ex.id : novoSe(D.funcionarios, f.id, () => false);
       mapF[f.id] = id;
-      funcs.push({ id, nome: T(f.nome).trim() || numero, numero, equipa_id: f.equipa_id != null ? (mapE[f.equipa_id] ?? null) : null, ativo: f.ativo !== false });
+      funcs.push({ id, nome: T(f.nome).trim() || numero, numero, equipa_id: f.equipa_id != null ? (mapE[f.equipa_id] ?? null) : null, ativo: f.ativo !== false, ...autoria(f) });
     }
     await VR.Importar._upsert("funcionarios", funcs, progresso, "Funcionários");
 
@@ -80,7 +88,7 @@ VR.Importar = {
       const ex = D.obras.find(x => ko(x) === ko(o));
       const id = ex ? ex.id : novoSe(D.obras, o.id, () => false);
       mapO[o.id] = id;
-      obras.push({ id, cliente: T(o.cliente), nome: T(o.nome).trim() || "Obra", localidade: T(o.localidade), morada: T(o.morada), ativa: o.ativa !== false });
+      obras.push({ id, cliente: T(o.cliente), nome: T(o.nome).trim() || "Obra", localidade: T(o.localidade), morada: T(o.morada), ativa: o.ativa !== false, ...autoria(o) });
     }
     await VR.Importar._upsert("obras", obras, progresso, "Obras");
 
@@ -92,7 +100,7 @@ VR.Importar = {
       if (!data || vistosFer.has(data)) continue;
       vistosFer.add(data);
       const ex = D.feriados.find(x => x.data === data);
-      fers.push({ id: ex ? ex.id : novoSe(D.feriados, f.id, () => false), data, nome: T(f.nome) || "Feriado" });
+      fers.push({ id: ex ? ex.id : novoSe(D.feriados, f.id, () => false), data, nome: T(f.nome) || "Feriado", ...autoria(f) });
     }
     await VR.Importar._upsert("feriados", fers, progresso, "Feriados");
 
@@ -118,8 +126,7 @@ VR.Importar = {
         break_threshold_minutes: N(r.break_threshold_minutes, N(defs.break_threshold_minutes, 360)),
         gross_minutes: N(r.gross_minutes), break_applied_minutes: N(r.break_applied_minutes),
         net_minutes: N(r.net_minutes), overtime_minutes: N(r.overtime_minutes),
-        criado_por_id: mapU(r.criado_por_id), atualizado_por_id: mapU(r.atualizado_por_id) ?? App.user.id,
-        criado_em: r.criado_em || agora, atualizado_em: r.atualizado_em || r.criado_em || agora,
+        ...autoria(r),
       });
     }
     await VR.Importar._upsert("registos", regs, progresso, "Registos");
@@ -140,7 +147,7 @@ VR.Importar = {
       const ocupado = D.alocacoes.find(x => x.id === id && x.registo_id !== rid);
       if (!Number.isSafeInteger(id) || id <= 0 || ocupado || idsAloc.has(id)) id = VR.novoId();
       idsAloc.add(id);
-      alocs.push({ id, registo_id: rid, obra_id: oid, minutos: Math.max(0, N(a.minutos)) });
+      alocs.push({ id, registo_id: rid, obra_id: oid, minutos: Math.max(0, N(a.minutos)), ...autoria(a) });
     }
     await VR.Importar._upsert("alocacoes", alocs, progresso, "Horas por obra");
 
@@ -154,7 +161,7 @@ VR.Importar = {
       ocs.push({
         id, registo_id: rid, tipo: VR.LABEL_OCORRENCIA[o.tipo] ? o.tipo : "outro",
         descricao: T(o.descricao).slice(0, 2000), foto: T(o.foto).replace(/^\/+/, "").replace(/^fotos\//, ""),
-        criado_por_id: mapU(o.criado_por_id), criado_em: o.criado_em || agora, atualizado_em: o.atualizado_em || o.criado_em || agora,
+        ...autoria(o),
       });
     }
     await VR.Importar._upsert("ocorrencias", ocs, progresso, "Ocorrências");
@@ -166,7 +173,7 @@ VR.Importar = {
       notas.push({
         id: novoSe(D.notas, n.id, (x) => x.data === T(n.data).slice(0, 10) && x.texto === T(n.texto)),
         data: T(n.data).slice(0, 10), texto: T(n.texto).slice(0, 2000), autor_id: mapU(n.autor_id),
-        criado_em: n.criado_em || agora, atualizado_em: n.atualizado_em || n.criado_em || agora,
+        ...autoria(n, n.autor_id),
       });
     }
     await VR.Importar._upsert("notas", notas, progresso, "Notas");

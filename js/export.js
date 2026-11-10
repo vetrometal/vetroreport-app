@@ -1,6 +1,6 @@
 /* Exportações CSV e XLSX (OOXML mínimo via CompressionStream) */
 VR.Export = {
-  cabecalho: ["Número","Nome","Equipa","Dias trabalhados","Horas","Horas extra","Faltas justificadas","Faltas injustificadas","Baixas médicas","Férias","Outras ausências","Ocorrências","Horas por cliente"],
+  cabecalho: ["Número","Nome","Equipa","Dias trabalhados","Horas","Horas extra","Faltas justificadas","Faltas injustificadas","Baixas médicas","Férias","Outras ausências","Ocorrências","Horas por cliente","Registado por"],
 
   csv(relatorio) {
     const linhas = [this.cabecalho.join(";")];
@@ -10,7 +10,7 @@ VR.Export = {
         l.funcionario.numero, l.funcionario.nome, eq?eq.nome:"",
         l.dias, VR.minutosParaCsv(l.minutos), VR.minutosParaCsv(l.extra),
         l.faltas.falta_justificada, l.faltas.falta_injustificada, l.faltas.baixa_medica, l.faltas.ferias, l.faltas.outro,
-        l.ocorrencias, l.horas_por_cliente,
+        l.ocorrencias, l.horas_por_cliente, l.registado_por,
       ].map(VR.Export._csvCell).join(";"));
     }
     const bom = "\ufeff";
@@ -33,7 +33,7 @@ VR.Export = {
         l.funcionario.numero, l.funcionario.nome, eq?eq.nome:"",
         l.dias, VR.minutosParaDecimal(l.minutos), VR.minutosParaDecimal(l.extra),
         l.faltas.falta_justificada, l.faltas.falta_injustificada, l.faltas.baixa_medica, l.faltas.ferias, l.faltas.outro,
-        l.ocorrencias, l.horas_por_cliente,
+        l.ocorrencias, l.horas_por_cliente, l.registado_por,
       ]);
     }
     sheets.push({ name: "Resumo", rows: resumoRows });
@@ -41,6 +41,14 @@ VR.Export = {
       name: "Horas por cliente",
       rows: [["Cliente","Obra","Localidade","Número","Nome","Horas"],
         ...relatorio.detalhes_obras.map(d => [d.cliente,d.obra,d.localidade,d.numero,d.nome,VR.minutosParaDecimal(d.minutos)])],
+    });
+    sheets.push({
+      name: "Registos diários",
+      rows: [["Data","Número","Nome","Equipa","Presença","Entrada","Saída","Horas","Horas extra","Obras","Criado por","Criado em","Alterado por","Alterado em"],
+        ...(relatorio.registos_dia || []).map(r => [
+          r.data.split("-").reverse().join("/"), r.numero, r.nome, r.equipa, r.presenca, r.entrada, r.saida,
+          VR.minutosParaDecimal(r.minutos), VR.minutosParaDecimal(r.extra), r.obras, r.criado_por, r.criado_em, r.alterado_por, r.alterado_em,
+        ])],
     });
     sheets.push({
       name: "Ocorrências",
@@ -127,6 +135,8 @@ ${sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlfo
       const local = new Uint8Array(30 + nameBytes.length);
       const lv = new DataView(local.buffer);
       lv.setUint32(0, 0x04034b50, true);
+      lv.setUint16(4, 20, true);
+      lv.setUint16(6, 0x0800, true);
       lv.setUint16(8, method, true);
       lv.setUint32(14, crc, true);
       lv.setUint32(18, compressed.length, true);
@@ -142,7 +152,10 @@ ${sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlfo
       const cd = new Uint8Array(46 + e.nameBytes.length);
       const v = new DataView(cd.buffer);
       v.setUint32(0, 0x02014b50, true);
-      v.setUint16(8, e.method, true);
+      v.setUint16(4, 20, true);            // versão que criou
+      v.setUint16(6, 20, true);            // versão necessária
+      v.setUint16(8, 0x0800, true);        // nomes em UTF-8
+      v.setUint16(10, e.method, true);     // método de compressão (antes ia, por engano, no campo das flags)
       v.setUint32(16, e.crc, true);
       v.setUint32(20, e.comp, true);
       v.setUint32(24, e.raw, true);
