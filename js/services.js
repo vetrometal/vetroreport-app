@@ -24,7 +24,7 @@ VR.Services = {
     data.auditoria.unshift({
       id, utilizador_id: utilizador ? utilizador.id : null,
       acao, modelo, objeto_id: String(objeto_id), resumo: String(resumo).slice(0,240),
-      detalhe: detalhe || {}, criado_em: VR.agoraISO(),
+      detalhe: { ...(detalhe || {}), versao_app: VR.VERSAO }, criado_em: VR.agoraISO(),
     });
     if (data.auditoria.length > 2000) data.auditoria.length = 2000;
   },
@@ -60,15 +60,15 @@ VR.Services = {
         normal_day_minutes: dia_normal,
         break_minutes: pausa,
         break_threshold_minutes: limiar,
-        criado_por_id: utilizador.id,
+        criado_por: utilizador.id,
         criado_em: VR.agoraISO(),
       };
       data.registos.push(reg);
     }
     Object.assign(reg, {
       presenca, nota_presenca, trabalho,
-      atualizado_por_id: utilizador.id,
-      atualizado_em: VR.agoraISO(),
+      alterado_por: utilizador.id,
+      alterado_em: VR.agoraISO(),
       ...campos,
     });
     data.alocacoes = data.alocacoes.filter(a => a.registo_id !== reg.id);
@@ -124,7 +124,7 @@ VR.Services = {
     const oc = {
       id: VR.nextId(data,"ocorrencias"),
       registo_id: registo.id, tipo, descricao, foto: foto_path || "",
-      criado_por_id: utilizador.id, criado_em: VR.agoraISO(), atualizado_em: VR.agoraISO(),
+      criado_por: utilizador.id, criado_em: VR.agoraISO(), alterado_em: VR.agoraISO(),
     };
     data.ocorrencias.push(oc);
     const f = VR.Services.funcionarioPorId(data, registo.funcionario_id);
@@ -151,7 +151,7 @@ VR.Services = {
     if (texto.length > 2000) throw new Error("A nota pode ter no máximo 2000 caracteres.");
     const nota = {
       id: VR.nextId(data,"notas"), data: iso, texto,
-      autor_id: autor.id, criado_em: VR.agoraISO(), atualizado_em: VR.agoraISO(),
+      autor_id: autor.id, criado_em: VR.agoraISO(), alterado_em: VR.agoraISO(),
     };
     data.notas.push(nota);
     VR.Services.auditoria(data, {
@@ -210,15 +210,15 @@ VR.Services = {
   eventosMural(data, iso) {
     const eventos = [];
     for (const reg of data.registos.filter(r => r.data === iso)) {
-      eventos.push({ tipo:"registo", quando: reg.criado_em, autor_id: reg.criado_por_id, registo: reg });
-      if (reg.atualizado_por_id && reg.atualizado_em && reg.criado_em) {
-        const diff = (new Date(reg.atualizado_em) - new Date(reg.criado_em)) / 1000;
-        if (diff > 60) eventos.push({ tipo:"edicao", quando: reg.atualizado_em, autor_id: reg.atualizado_por_id, registo: reg });
+      eventos.push({ tipo:"registo", quando: reg.criado_em, autor_id: reg.criado_por, registo: reg });
+      if (reg.alterado_por && reg.alterado_em && reg.criado_em) {
+        const diff = (new Date(reg.alterado_em) - new Date(reg.criado_em)) / 1000;
+        if (diff > 60) eventos.push({ tipo:"edicao", quando: reg.alterado_em, autor_id: reg.alterado_por, registo: reg });
       }
     }
     for (const oc of data.ocorrencias) {
       const reg = data.registos.find(r => r.id === oc.registo_id);
-      if (reg && reg.data === iso) eventos.push({ tipo:"ocorrencia", quando: oc.criado_em, autor_id: oc.criado_por_id, ocorrencia: oc, registo: reg });
+      if (reg && reg.data === iso) eventos.push({ tipo:"ocorrencia", quando: oc.criado_em, autor_id: oc.criado_por, ocorrencia: oc, registo: reg });
     }
     for (const nota of data.notas.filter(n => n.data === iso)) {
       eventos.push({ tipo:"nota", quando: nota.criado_em, autor_id: nota.autor_id, nota });
@@ -289,12 +289,30 @@ VR.Services = {
     const linhas = [];
     const detalhes = [];
     const ocorrencias = [];
+    const registos_dia = [];
+    const nomeU = (id, origem) => { if (id != null) { const u = VR.Services.userPorId(data, id); return u ? u.nome : "utilizador removido"; } return origem === "importado" ? "importado" : ""; };
     const funcs = [...data.funcionarios].sort((a,b)=>a.numero.localeCompare(b.numero)||a.nome.localeCompare(b.nome,"pt"));
     for (const f of funcs) {
       const doMes = porFunc.get(f.id) || [];
       const faltas = Object.fromEntries(tiposAus.map(t=>[t,0]));
       let dias=0, minutos=0, extra=0, totalOc=0;
       const obras = new Map();
+      const autores = new Set();
+      for (const reg of [...doMes].sort((a,b)=>a.data.localeCompare(b.data))) {
+        const criou = nomeU(reg.criado_por, reg.origem);
+        if (criou) autores.add(criou);
+        const eqR = VR.Services.equipaPorId(data, f.equipa_id);
+        const obrasReg = VR.Services.alocacoesDe(data, reg.id).map(a => { const o = VR.Services.obraPorId(data, a.obra_id); return o ? o.nome : ""; }).filter(Boolean).join(" | ");
+        registos_dia.push({
+          data: reg.data, numero: f.numero, nome: f.nome, equipa: eqR ? eqR.nome : "",
+          presenca: VR.LABEL_PRESENCA[reg.presenca] || reg.presenca,
+          entrada: reg.presenca === "presente" ? (reg.entrada || "") : "", saida: reg.presenca === "presente" ? (reg.saida || "") : "",
+          minutos: reg.presenca === "presente" ? (reg.net_minutes || 0) : 0, extra: reg.presenca === "presente" ? (reg.overtime_minutes || 0) : 0,
+          obras: obrasReg,
+          criado_por: criou, criado_em: reg.criado_em ? VR.fmtDataHora24(reg.criado_em) : "",
+          alterado_por: nomeU(reg.alterado_por, reg.origem), alterado_em: reg.alterado_em ? VR.fmtDataHora24(reg.alterado_em) : "",
+        });
+      }
       for (const reg of doMes) {
         if (reg.presenca === "presente") {
           dias++; minutos += reg.net_minutes||0; extra += reg.overtime_minutes||0;
@@ -308,24 +326,25 @@ VR.Services = {
         } else if (faltas[reg.presenca] != null) faltas[reg.presenca]++;
         for (const oc of VR.Services.ocorrenciasDe(data, reg.id)) {
           totalOc++;
-          const autor = VR.Services.userPorId(data, oc.criado_por_id);
+          const autor = VR.Services.userPorId(data, oc.criado_por);
           const eq = VR.Services.equipaPorId(data, f.equipa_id);
           ocorrencias.push({
             data: reg.data, numero:f.numero, nome:f.nome, equipa: eq?eq.nome:"",
             tipo: oc.tipo, tipo_label: VR.LABEL_OCORRENCIA[oc.tipo]||oc.tipo,
-            descricao: oc.descricao, autor: autor?autor.nome:"",
+            descricao: oc.descricao, autor: autor?autor.nome:nomeU(oc.criado_por, oc.origem),
             hora: oc.criado_em ? VR.fmtHora24(oc.criado_em) : "",
           });
         }
       }
       if (!f.ativo && dias===0 && Object.values(faltas).every(v=>v===0) && totalOc===0) continue;
       linhas.push({
-        funcionario: f, dias, minutos, extra, faltas, ocorrencias: totalOc,
+        funcionario: f, dias, minutos, extra, faltas, ocorrencias: totalOc, registado_por: [...autores].sort((a,b)=>a.localeCompare(b,"pt")).join(", "),
         obras: [...obras.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])),
         get horas_por_cliente() { return this.obras.map(([r,m])=>`${r}: ${VR.minutosParaCsv(m)}`).join(" | "); },
       });
     }
     ocorrencias.sort((a,b)=>a.data.localeCompare(b.data)||a.nome.localeCompare(b.nome,"pt"));
-    return { ano, mes, inicio, fim, linhas, detalhes_obras: detalhes, ocorrencias };
+    registos_dia.sort((a,b)=>a.data.localeCompare(b.data)||a.nome.localeCompare(b.nome,"pt"));
+    return { ano, mes, inicio, fim, linhas, detalhes_obras: detalhes, ocorrencias, registos_dia };
   },
 };

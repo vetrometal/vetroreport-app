@@ -1,6 +1,6 @@
-/* VetroReport v3.0 (PWA + Supabase) — núcleo (horas, datas, crypto, utilitários) */
+/* VetroReport (PWA + Supabase) — núcleo (horas, datas, crypto, utilitários) */
 const VR = {
-  VERSAO: "3.0",
+  VERSAO: self.APP_VERSION || "?",
   MESES: ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"],
   DIAS: ["segunda-feira","terça-feira","quarta-feira","quinta-feira","sexta-feira","sábado","domingo"],
   PRESENCAS: [

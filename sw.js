@@ -1,17 +1,26 @@
-/* VetroReport v3.0 — service worker: guarda a aplicação para abrir sem rede.
-   Os dados (Supabase) vão sempre à rede; nunca são guardados aqui. */
-const VERSAO = "vetroreport-3.0";
+/* VetroReport — service worker: guarda a aplicação para abrir sem rede.
+   A versão vem de js/config.js (APP_VERSION): ao mudar, a cache muda de nome e a app avisa
+   «Nova versão disponível — atualizar». Os dados (Supabase) vão sempre à rede. */
+importScripts("js/config.js");
+const VERSAO = "vetroreport-" + self.APP_VERSION;
 const FICHEIROS = [
-  "./", "index.html", "app.css?v=3.0", "manifest.webmanifest",
-  "vendor/supabase.js?v=2.119.0",
-  "js/config.js?v=3.0", "js/core.js?v=3.0", "js/store.js?v=3.0", "js/services.js?v=3.0",
-  "js/export.js?v=3.0", "js/ui.js?v=3.0", "js/auth.js?v=3.0", "js/importar.js?v=3.0", "js/boot.js?v=3.0",
+  "./", "index.html", "app.css", "manifest.webmanifest",
+  "vendor/supabase.js",
+  "js/config.js", "js/core.js", "js/changelog.js", "js/store.js", "js/services.js",
+  "js/export.js", "js/ui.js", "js/auth.js", "js/importar.js", "js/boot.js",
   "fonts/outfit.woff2",
   "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png", "icons/favicon-32.png",
 ];
 
 self.addEventListener("install", (ev) => {
-  ev.waitUntil(caches.open(VERSAO).then(c => c.addAll(FICHEIROS)).then(() => self.skipWaiting()));
+  // cache: "reload" evita ficheiros antigos da cache HTTP do navegador
+  ev.waitUntil(caches.open(VERSAO).then(c => c.addAll(FICHEIROS.map(u => new Request(u, { cache: "reload" })))));
+  // Primeira instalação: ativa já. Atualização: espera que o utilizador carregue em «atualizar».
+});
+
+self.addEventListener("message", (ev) => {
+  if (ev.data === "ATUALIZAR") self.skipWaiting();
+  if (ev.data === "VERSAO" && ev.source) ev.source.postMessage({ versao: self.APP_VERSION });
 });
 
 self.addEventListener("activate", (ev) => {
@@ -28,15 +37,12 @@ self.addEventListener("fetch", (ev) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // Supabase e outros: sempre rede
   if (req.mode === "navigate") {
-    // Página: rede primeiro (para apanhar versões novas), cache se não houver rede
-    ev.respondWith(
-      fetch(req).then(r => { const c = r.clone(); caches.open(VERSAO).then(x => x.put("index.html", c)); return r; })
-        .catch(() => caches.match("index.html"))
-    );
+    // Página: a da versão instalada (coerente com os scripts em cache); sem cache, rede.
+    ev.respondWith(caches.open(VERSAO).then(c => c.match("index.html")).then(hit => hit || fetch(req)));
     return;
   }
   ev.respondWith(
-    caches.match(req).then(hit => hit || fetch(req).then(r => {
+    caches.open(VERSAO).then(c => c.match(req, { ignoreSearch: true })).then(hit => hit || fetch(req).then(r => {
       if (r.ok && r.type === "basic") { const c = r.clone(); caches.open(VERSAO).then(x => x.put(req, c)); }
       return r;
     }))

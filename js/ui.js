@@ -1,4 +1,4 @@
-/* VetroReport v3.0 — interface (SPA hash-router) */
+/* VetroReport — interface (SPA hash-router) */
 const App = {
   store: null,
   user: null,
@@ -61,6 +61,7 @@ App.render = async () => {
     else if (path === "/responsavel/novo" || path.startsWith("/responsavel/editar/")) html = App.views.responsavelForm(path);
     else if (path === "/definicoes") html = App.views.definicoes();
     else if (path === "/auditoria") html = App.views.auditoria();
+    else if (path === "/historico") html = App.views.historico();
     else html = `<main class="app-main"><p class="empty">Página não encontrada.</p></main>`;
   } catch (e) {
     console.error(e);
@@ -100,7 +101,7 @@ App.nav = (active) => {
   ${item("/registar","Registar",`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3.5h8a2 2 0 0 1 2 2V20l-6-3-6 3V5.5a2 2 0 0 1 2-2z"></path><path d="M9 8.5h6M9 12h6"></path></svg>`,["registar","ficha"])}
   ${item("/mural","Mural",`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14M5 12h14M5 17.5h9"></path></svg>`,["mural"])}
   ${item("/relatorios","Relatórios",`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V10M10 19V5M15 19v-6M20 19V8"></path></svg>`,["relatorios"])}
-  ${item("/mais","Mais",`<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.4"></circle><circle cx="12" cy="12" r="1.4"></circle><circle cx="18" cy="12" r="1.4"></circle></svg>`,["mais","funcionarios","obras","equipas","responsaveis","definicoes","auditoria","importar"])}
+  ${item("/mais","Mais",`<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.4"></circle><circle cx="12" cy="12" r="1.4"></circle><circle cx="18" cy="12" r="1.4"></circle></svg>`,["mais","funcionarios","obras","equipas","responsaveis","definicoes","auditoria","importar","historico"])}
 </nav>`;
 };
 
@@ -136,6 +137,20 @@ App.horarioHtml = (reg, minutosSec) => {
   return minutosSec!=null ? `<b class="num">${VR.esc(VR.fmtHm(minutosSec))}</b>` : "";
 };
 
+/* «Criado por X em dd/mm/aaaa HH:MM · Alterado por Y em …» (dados da base de dados, 24h) */
+App.nomeAutor = (id, origem) => {
+  if (id != null) { const u = VR.Services.userPorId(App.store.data, id); if (u) return u.nome; return "utilizador removido"; }
+  return origem === "importado" ? "importado" : "sistema";
+};
+App.autoria = (row) => {
+  if (!row || !row.criado_em) return "";
+  const partes = [`Criado por <b>${VR.esc(App.nomeAutor(row.criado_por, row.origem))}</b> em ${VR.esc(VR.fmtDataHora24(row.criado_em))}`];
+  if (row.origem === "importado" && row.criado_por != null) partes[0] += " (importado da v2.3)";
+  const alterado = row.alterado_em && Math.abs(new Date(row.alterado_em) - new Date(row.criado_em)) > 1000;
+  if (alterado) partes.push(`Alterado por <b>${VR.esc(App.nomeAutor(row.alterado_por, row.origem))}</b> em ${VR.esc(VR.fmtDataHora24(row.alterado_em))}`);
+  return `<p class="autoria" data-autoria>${partes.join(" · ")}</p>`;
+};
+
 App.views = {};
 
 App.marca = () => `<img class="login-logo" src="icons/icon-192.png" alt="" width="84" height="84">`;
@@ -158,7 +173,7 @@ App.views.login = () => {
   </form>
   ${App.installPrompt?`<button class="btn ghost" type="button" data-action="instalar" style="margin-top:.6rem;width:100%">Instalar a aplicação</button>`:""}
   <p class="fine"><a href="#/primeira">Primeira utilização: criar administrador</a></p>
-  <p class="fine versao">VetroReport ${VR.VERSAO}</p>
+  <p class="fine versao" data-versao-app>VetroReport versão ${VR.esc(VR.VERSAO)}</p>
 </section></div>`;
 };
 
@@ -346,10 +361,11 @@ App.views.ficha = async (fid, params) => {
         if (!url) { url = await App.store.lerFotoUrl(oc.foto); if (url) App.fotoUrls.set(oc.foto, url); }
         if (url) img = `<img class="shot" src="${url}" alt="Fotografia da ocorrência">`;
       }
-      const autor = VR.Services.userPorId(App.store.data, oc.criado_por_id);
+      const autor = VR.Services.userPorId(App.store.data, oc.criado_por);
       lista.push(`<li class="card"><div class="card-top"><span class="tag tag-${oc.tipo}">${VR.esc(VR.LABEL_OCORRENCIA[oc.tipo])}</span>
         <small>${oc.criado_em?VR.fmtHora24(oc.criado_em):""}${autor?` · ${VR.esc(autor.nome)}`:""}</small></div>
         <p>${VR.esc(oc.descricao)}</p>${img}
+        ${App.autoria(oc)}
         <form data-action="apagar-ocorrencia" data-confirm="Apagar esta ocorrência?">
           <input type="hidden" name="ocorrencia_id" value="${oc.id}">
           <button class="btn ghost danger" type="submit" ${App.store.leitura?"disabled":""}>Apagar</button>
@@ -396,6 +412,7 @@ ${!f.ativo?`<p class="banner">Este funcionário está inativo. O histórico mant
     <p class="hint">Pode gravar sem obra. Com uma só obra, deixe as horas em branco para usar o turno todo. Com várias, a soma tem de fechar com as horas líquidas.</p>
     <label class="field"><span>Trabalho realizado, opcional</span><textarea class="input" name="trabalho">${VR.esc(reg?reg.trabalho:"")}</textarea></label>
   </div>
+  ${App.autoria(reg)}
   <div class="sticky-actions"><button class="btn" type="submit" ${App.store.leitura?"disabled":""}>Guardar registo</button></div>
 </form>
 <template id="obra-row-template"><div class="obra-row">
@@ -445,6 +462,7 @@ App.views.mural = async () => {
       items.push(`<li class="event event-nota"><time>${hora}</time><article>
         <p class="event-kicker">Nota de ${VR.esc(autor?autor.nome:"?")}</p>
         <p>${VR.esc(ev.nota.texto)}</p>
+        ${App.autoria(ev.nota)}
         ${pode?`<form data-action="apagar-nota" data-confirm="Apagar esta nota?"><input type="hidden" name="nota_id" value="${ev.nota.id}"><button class="btn ghost danger" type="submit" ${App.store.leitura?"disabled":""}>Apagar nota</button></form>`:""}
       </article></li>`);
     }
@@ -521,11 +539,24 @@ ${admin?`<nav class="menu" aria-label="Gestão">
   <a href="#/importar">Importar da versão 2.3 <small>Ficheiro vetroreport.json do OneDrive e fotografias</small></a>
 </nav>`:`<p class="empty">Partilha os registos com os outros responsáveis. Funcionários, obras e salários são tratados pela administração.</p>`}
 <nav class="menu" aria-label="Aplicação">
+  <a href="#/historico">Histórico de atualizações <small>O que mudou em cada versão · versão atual ${VR.esc(VR.VERSAO)}</small></a>
   <a href="#" data-action="atualizar-dados">Atualizar dados <small>Últimos dados de todos os utilizadores${App.store&&App.store.carregadoEm?` · ${VR.esc(VR.fmtDataHora24(App.store.carregadoEm))}`:""}</small></a>
   ${App.installPrompt?`<a href="#" data-action="instalar">Instalar a aplicação <small>Ícone no ecrã principal ou no ambiente de trabalho</small></a>`:""}
 </nav>
 <button class="btn ghost danger logout" type="button" data-action="logout">Terminar sessão</button>
-<p class="fine versao">VetroReport ${VR.VERSAO} · dados na nuvem (Supabase)</p>`, "mais");
+<p class="fine versao" data-versao-app>VetroReport versão ${VR.esc(VR.VERSAO)} · dados na nuvem (Supabase)</p>`, "mais");
+};
+
+App.views.historico = () => {
+  const fmt = (d) => d ? d.split("-").reverse().join("/") : "data não registada";
+  const lista = VR.CHANGELOG.map((v, i) => `<li class="card" data-versao="${VR.esc(v.versao)}">
+    <h2><span class="v-num ${v.versao===VR.VERSAO?"v-atual":""}">${VR.esc(v.versao)}</span> ${VR.esc(v.titulo)} <span class="v-data">${VR.esc(fmt(v.data))}${v.versao===VR.VERSAO?" · versão atual":""}</span></h2>
+    <ul>${v.alteracoes.map(a => `<li>${VR.esc(a)}</li>`).join("")}</ul></li>`).join("");
+  return App.shell(`<header class="page-head"><a class="back" href="#/mais">Voltar</a>
+  <p class="eyebrow">VetroReport versão ${VR.esc(VR.VERSAO)}</p>
+  <h1>Histórico de atualizações</h1>
+  <p class="lede">O que mudou em cada versão, da mais recente para a mais antiga.</p></header>
+  <ol class="changelog">${lista}</ol>`, "historico");
 };
 
 App.views.funcionarios = () => {
@@ -557,6 +588,7 @@ App.views.funcionarioForm = (path) => {
       ${equipas.map(e=>`<option value="${e.id}" ${f.equipa_id===e.id?"selected":""}>${VR.esc(e.nome)}</option>`).join("")}
     </select></label>
     <label class="field check-line"><input type="checkbox" name="ativo" ${f.ativo?"checked":""}> <span>Ativo</span></label>
+    ${id?App.autoria(f):""}
     <button class="btn" type="submit">Guardar</button>
   </form>`, "funcionarios");
 };
@@ -578,6 +610,7 @@ App.views.fichaFuncionario = (id) => {
     <h1>${VR.esc(f.nome)}</h1>
   </div></div>
   ${App.requireAdmin()?`<a class="text-link" href="#/funcionario/editar/${id}">Editar</a>`:""}
+  ${App.autoria(f)}
 </header>
 <section class="block"><h2>Últimos registos</h2><ul class="stack">${lista||`<li class="empty">Sem registos.</li>`}</ul></section>`, "funcionarios");
 };
@@ -604,6 +637,7 @@ App.views.equipaForm = (path) => {
     <input type="hidden" name="id" value="${id||""}">
     <label class="field"><span>Nome</span><input class="input" name="nome" required value="${VR.esc(e.nome)}"></label>
     <label class="field"><span>Ordem</span><input class="input" name="ordem" type="number" min="0" value="${e.ordem||0}"></label>
+    ${id?App.autoria(e):""}
     <button class="btn" type="submit">Guardar</button>
   </form>`, "equipas");
 };
@@ -631,6 +665,7 @@ App.views.obraForm = (path) => {
     <label class="field"><span>Localidade</span><input class="input" name="localidade" required value="${VR.esc(o.localidade)}"></label>
     <label class="field"><span>Morada</span><input class="input" name="morada" value="${VR.esc(o.morada||"")}"></label>
     <label class="field check-line"><input type="checkbox" name="ativa" ${o.ativa?"checked":""}> <span>Ativa</span></label>
+    ${id?App.autoria(o):""}
     <button class="btn" type="submit">Guardar</button>
   </form>`, "obras");
 };
@@ -662,6 +697,7 @@ App.views.responsavelForm = (path) => {
     </select></label>
     <label class="field"><span>Nova palavra-passe ${id?"(deixar em branco para manter)":""}</span><input class="input" name="password" type="password" ${id?"":"required minlength=8"}></label>
     <label class="field check-line"><input type="checkbox" name="ativo" ${u.ativo!==false?"checked":""}> <span>Ativo</span></label>
+    ${id?App.autoria(u):""}
     <button class="btn" type="submit">Guardar</button>
   </form>`, "responsaveis");
 };
@@ -686,6 +722,7 @@ App.views.definicoes = () => {
     <label class="field"><span>Nome</span><input class="input" name="nome" required></label>
     <button class="btn" type="submit">Acrescentar</button>
   </form>
+  ${App.autoria(App.store.data.definicoes)}
   <ul class="stack">${feriados||`<li class="empty">Sem feriados.</li>`}</ul></section>`, "definicoes");
 };
 
@@ -902,7 +939,7 @@ App.actions = {
     const atual = VR.Services.registoDoDia(App.store.data, fid, iso);
     const versaoAgora = atual ? (atual.updated_at || "") : "novo";
     if ((form.dataset.versao || "") !== versaoAgora) {
-      const quem = atual ? VR.Services.userPorId(App.store.data, atual.atualizado_por_id) : null;
+      const quem = atual ? VR.Services.userPorId(App.store.data, atual.alterado_por) : null;
       const ok = confirm(`Este registo foi ${form.dataset.versao==="novo"?"criado":"alterado"} por ${quem?quem.nome:"outra pessoa"} enquanto o estava a editar.\n\nOK = gravar a sua versão por cima.\nCancelar = ver a versão mais recente.`);
       if (!ok) { App.formSujo = false; await App.render(); return; }
     }

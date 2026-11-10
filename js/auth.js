@@ -1,4 +1,4 @@
-/* VetroReport v3.0 — sessão (Supabase Auth) e função vr-auth */
+/* VetroReport — sessão (Supabase Auth) e função vr-auth */
 App.funcao = async (body) => {
   const cfg = window.VR_CONFIG;
   const headers = { "Content-Type": "application/json", apikey: cfg.SUPABASE_KEY };
@@ -51,6 +51,16 @@ App.iniciarSessao = async () => {
   App.store.onRemoto = App.aoMudarRemoto;
   await App.store.carregar({ admin: u.role === "admin" });
   App.store.ligarRealtime();
+  if (u.role === "admin") App.registarVersao().catch(e => console.warn("versoes_app", e));
+};
+
+/* Regista a versão atual na tabela versoes_app (histórico na base de dados), uma vez por versão */
+App.registarVersao = async () => {
+  const v = (VR.CHANGELOG || []).find(x => x.versao === VR.VERSAO);
+  if (!v) return;
+  const { data } = await App.sb.from("versoes_app").select("versao").eq("versao", v.versao).maybeSingle();
+  if (data) return;
+  await App.sb.from("versoes_app").insert({ versao: v.versao, data: v.data, resumo: v.titulo, alteracoes: v.alteracoes, registada_por: App.user.id });
 };
 
 App.sair = async () => {
